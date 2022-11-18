@@ -13,7 +13,7 @@ if defined?(ActiveRecord::Base)
             alias_method :reload_without_attr_encrypted, :reload
             def reload(*args, &block)
               result = reload_without_attr_encrypted(*args, &block)
-              self.class.encrypted_attributes.keys.each do |attribute_name|
+              self.class.legacy_encrypted_attributes.keys.each do |attribute_name|
                 instance_variable_set("@#{attribute_name}", nil)
               end
               result
@@ -29,8 +29,8 @@ if defined?(ActiveRecord::Base)
             def perform_attribute_assignment(method, new_attributes, *args)
               return if new_attributes.blank?
 
-              send method, new_attributes.reject { |k, _|  self.class.encrypted_attributes.key?(k.to_sym) }, *args
-              send method, new_attributes.reject { |k, _| !self.class.encrypted_attributes.key?(k.to_sym) }, *args
+              send method, new_attributes.reject { |k, _|  self.class.legacy_encrypted_attributes.key?(k.to_sym) }, *args
+              send method, new_attributes.reject { |k, _| !self.class.legacy_encrypted_attributes.key?(k.to_sym) }, *args
             end
             private :perform_attribute_assignment
 
@@ -56,7 +56,7 @@ if defined?(ActiveRecord::Base)
             options = attrs.extract_options!
             attr = attrs.pop
             attribute attr
-            options.merge! encrypted_attributes[attr]
+            options.merge! legacy_encrypted_attributes[attr]
 
             define_method("#{attr}_was") do
               attribute_was(attr)
@@ -71,19 +71,6 @@ if defined?(ActiveRecord::Base)
             end
 
             define_method("#{attr}_with_dirtiness=") do |value|
-              ## Source: https://github.com/priyankatapar/attr_encrypted/commit/7e8702bd5418c927a39d8dd72c0adbea522d5663
-              # In ActiveRecord 5.2+, due to changes to the way virtual
-              # attributes are handled, @attributes[attr].value is nil which
-              # breaks attribute_was. Setting it here returns us to the expected
-              # behavior.
-              if Gem::Requirement.new('>= 5.2').satisfied_by?(RAILS_VERSION)
-                # This is needed support attribute_was before a record has
-                # been saved
-                set_attribute_was(attr, __send__(attr)) if value != __send__(attr)
-                # This is needed to support attribute_was after a record has
-                # been saved
-                @attributes.write_from_user(attr.to_s, value) if value != __send__(attr)
-              end
               attribute_will_change!(attr) if value != __send__(attr)
               __send__("#{attr}_without_dirtiness=", value)
             end
@@ -131,10 +118,10 @@ if defined?(ActiveRecord::Base)
             if match = /^(find|scoped)_(all_by|by)_([_a-zA-Z]\w*)$/.match(method.to_s)
               attribute_names = match.captures.last.split('_and_')
               attribute_names.each_with_index do |attribute, index|
-                if attr_encrypted?(attribute) && encrypted_attributes[attribute.to_sym][:mode] == :single_iv_and_salt
+                if attr_encrypted?(attribute) && legacy_encrypted_attributes[attribute.to_sym][:mode] == :single_iv_and_salt
                   args[index] = send("encrypt_#{attribute}", args[index])
                   warn "DEPRECATION WARNING: This feature will be removed in the next major release."
-                  attribute_names[index] = encrypted_attributes[attribute.to_sym][:attribute]
+                  attribute_names[index] = legacy_encrypted_attributes[attribute.to_sym][:attribute]
                 end
               end
               method = "#{match.captures[0]}_#{match.captures[1]}_#{attribute_names.join('_and_')}".to_sym
